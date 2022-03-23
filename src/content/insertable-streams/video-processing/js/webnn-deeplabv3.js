@@ -59,7 +59,12 @@ async function buildConstantByNpy(device, builder, url) {
 // DeepLab V3 MobileNet V2 model with 'nchw' input layout
 class DeepLabV3MNV2Nchw {
   constructor() {
-    this.weightsUrl_ = './models/deeplabv3_1_default_1_nchw/weights/';
+    this.weightsUrl_ = '../../../models/deeplabv3_1_default_1_nchw/weights/';
+    const isWorker = typeof DedicatedWorkerGlobalScope !== 'undefined' &&
+        globalThis instanceof DedicatedWorkerGlobalScope;
+    if (isWorker) {
+      this.weightsUrl_ = '../' + this.weightsUrl_;
+    }
     // Shares the same bias files with 'nhwc' layout
     this.biasUrl_ = this.weightsUrl_;
     this.inputOptions = {

@@ -211,10 +211,14 @@ const batch = [4, 4];
 
     this.deeplab_ = null;
 
-    this.blurBackgroundCheckbox_ = (/** @type {!HTMLInputElement} */ (
-      document.getElementById('segmentBackground')));
+    this.isWorker_ = typeof DedicatedWorkerGlobalScope !== 'undefined' &&
+        globalThis instanceof DedicatedWorkerGlobalScope;
+    if (!this.isWorker_) {
+      this.blurBackgroundCheckbox_ = (/** @type {!HTMLInputElement} */ (
+        document.getElementById('segmentBackground')));
 
-    this.gui_ = null;
+      this.gui_ = null;
+    }
   }
 
   /** @override */
@@ -355,12 +359,15 @@ const batch = [4, 4];
         new Uint32Array([settings.filterSize, blockDim])
       );
     };
-    if (this.gui_) {
-      this.gui_.destroy();
+
+    if (!this.isWorker_) {
+      if (this.gui_) {
+        this.gui_.destroy();
+      }
+      this.gui_ = new dat.GUI();
+      this.gui_.add(settings, 'filterSize', 1, 33).step(2).onChange(updateSettings);
+      this.gui_.add(settings, 'iterations', 1, 10).step(1);
     }
-    this.gui_ = new dat.GUI();
-    this.gui_.add(settings, 'filterSize', 1, 33).step(2).onChange(updateSettings);
-    this.gui_.add(settings, 'iterations', 1, 10).step(1);
 
     updateSettings();
 
@@ -434,7 +441,8 @@ const batch = [4, 4];
       return;
     }
 
-    const isSegmentBackground = this.blurBackgroundCheckbox_.checked ? true : false;
+    const isSegmentBackground = this.isWorker_ ?
+        true : (this.blurBackgroundCheckbox_.checked ? true : false);
 
     // Set output size to input size
     const frameWidth = frame.displayWidth;
@@ -442,7 +450,7 @@ const batch = [4, 4];
     if (canvas.width !== frameWidth || canvas.height !== frameHeight) {
       canvas.width = frameWidth;
       canvas.height = frameHeight;
-      const devicePixelRatio = window.devicePixelRatio || 1;
+      const devicePixelRatio = this.isWorker_ ? 1 : (window.devicePixelRatio || 1);
       const presentationSize = [
         canvas.width * devicePixelRatio,
         canvas.height * devicePixelRatio,
@@ -690,7 +698,9 @@ const batch = [4, 4];
       this.device_ = null;
     }
     this.deeplab_ = null;
-    this.gui_.destroy();
-    this.gui_ = null;
+    if (!this.isWorker_) {
+      this.gui_.destroy();
+      this.gui_ = null;
+    }
   }
 }

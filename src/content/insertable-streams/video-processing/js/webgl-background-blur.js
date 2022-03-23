@@ -49,8 +49,13 @@ class WebGLBackgroundBlurTransform { // eslint-disable-line no-unused-vars
     // tfjs deeplab model for segmentation
     this.deeplab_ = null;
 
-    this.blurBackgroundCheckbox_ = (/** @type {!HTMLInputElement} */ (
-      document.getElementById('segmentBackground')));
+    this.isWorker_ = typeof DedicatedWorkerGlobalScope !== 'undefined' &&
+        globalThis instanceof DedicatedWorkerGlobalScope;
+
+    if (!this.isWorker_) {
+      this.blurBackgroundCheckbox_ = (/** @type {!HTMLInputElement} */ (
+        document.getElementById('segmentBackground')));
+    }
   }
   /** @override */
   async init() {
@@ -277,13 +282,18 @@ class WebGLBackgroundBlurTransform { // eslint-disable-line no-unused-vars
 
     // Segmentation
     
-    const isSegmentBackground = this.blurBackgroundCheckbox_.checked ? true : false;
+    const isSegmentBackground = this.isWorker_ ?
+        true : (this.blurBackgroundCheckbox_.checked ? true : false);
     let resultTensor;
     let resultGPUData;
     if (isSegmentBackground) {
       if (!this.deeplab_) {
         await tf.setBackend(customBackendName);
-        this.deeplab_ = await tf.loadGraphModel('../../../tfjs-models/deeplab_pascal_1_default_1/model.json');
+        let modelUrl = '../../../models/deeplab_pascal_1_default_1/model.json';
+        if (this.isWorker_) {
+          modelUrl = '../' + modelUrl;
+        }
+        this.deeplab_ = await tf.loadGraphModel(modelUrl);
         console.log('DeepLab model loaded', this.deeplab_);
       }
       const resizedVideoBitmap = await createImageBitmap(
