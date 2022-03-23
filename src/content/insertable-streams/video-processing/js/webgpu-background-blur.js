@@ -210,6 +210,7 @@ const batch = [4, 4];
     this.segmapBuffer_ = null;
 
     this.deeplab_ = null;
+    this.hasWebNN_ = true; // will check WebNN when init deeplab
 
     this.isWorker_ = typeof DedicatedWorkerGlobalScope !== 'undefined' &&
         globalThis instanceof DedicatedWorkerGlobalScope;
@@ -225,9 +226,13 @@ const batch = [4, 4];
   async init() {
     console.log('[WebGPUBackgroundBlurTransform] Initializing WebGPU.');
     if (!navigator.gpu) {
-      alert(
-        'Failed to detect WebGPU. Check that WebGPU is supported ' +
-        'by your browser and hardware.');
+      const msg = 'Failed to detect WebGPU. Check that WebGPU is supported ' +
+          'by your browser and hardware.';
+      if (this.isWorker_) {
+        postMessage({error: msg});
+      } else {
+        alert(msg);
+      }
       return;
     }
     const adapter = await navigator.gpu.requestAdapter();
@@ -442,7 +447,7 @@ const batch = [4, 4];
     }
 
     const isSegmentBackground = this.isWorker_ ?
-        true : (this.blurBackgroundCheckbox_.checked ? true : false);
+        this.hasWebNN_ : (this.blurBackgroundCheckbox_.checked ? true : false);
 
     // Set output size to input size
     const frameWidth = frame.displayWidth;
@@ -567,10 +572,12 @@ const batch = [4, 4];
 
     if (isSegmentBackground && !this.deeplab_) {
       this.deeplab_ = new DeepLabV3MNV2Nchw()
-      const success = await this.deeplab_.init(this.device_);
-      if (!success) {
+      this.hasWebNN_ = await this.deeplab_.init(this.device_);
+      if (!this.hasWebNN_) {
         this.deeplab_ = null;
-        this.blurBackgroundCheckbox_.checked = false;
+        if (!this.isWorker_) {
+          this.blurBackgroundCheckbox_.checked = false;
+        }
       }
     }
 

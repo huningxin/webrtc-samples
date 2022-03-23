@@ -68,6 +68,7 @@ onmessage = async (event) => {
           .pipeTo(writable);
   } else if (operation === 'stop') {
     frameTransform.destroy();
+    frameTransform = null;
   } else {
     throw new Error(`unknown operation ${operation}`);
   }

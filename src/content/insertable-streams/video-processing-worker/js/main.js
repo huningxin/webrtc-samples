@@ -33,6 +33,11 @@ const updateFPS = (now, metadata) => {
 croppedVideo.requestVideoFrameCallback(updateFPS);
 
 const worker = new Worker('./js/worker.js', {name: 'Video processing worker'});
+worker.addEventListener('message', function handleMsgFromWorker(msg) {
+  if (msg.data.error) {
+    alert(msg.data.error);
+  }
+});
 let stream = null;
 startButton.addEventListener('click', async () => {
   stream = await navigator.mediaDevices.getUserMedia({audio: false, video: true});

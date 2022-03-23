@@ -60,9 +60,9 @@ async function buildConstantByNpy(device, builder, url) {
 class DeepLabV3MNV2Nchw {
   constructor() {
     this.weightsUrl_ = '../../../models/deeplabv3_1_default_1_nchw/weights/';
-    const isWorker = typeof DedicatedWorkerGlobalScope !== 'undefined' &&
+    this.isWorker_ = typeof DedicatedWorkerGlobalScope !== 'undefined' &&
         globalThis instanceof DedicatedWorkerGlobalScope;
-    if (isWorker) {
+    if (this.isWorker_) {
       this.weightsUrl_ = '../' + this.weightsUrl_;
     }
     // Shares the same bias files with 'nhwc' layout
@@ -127,9 +127,13 @@ class DeepLabV3MNV2Nchw {
   async init(device) {
     this.device_ = device;
     if (!navigator.ml) {
-      alert(
-        'Failed to detect WebNN. Check that WebNN is supported ' +
-        'by your browser and hardware.');
+      const msg = 'Failed to detect WebNN. Check that WebNN is supported ' +
+          'by your browser and hardware.';
+      if (this.isWorker_) {
+        postMessage({error: msg});
+      } else {
+        alert(msg);
+      }
       return false;
     }
     const context = navigator.ml.createContext(this.device_);
