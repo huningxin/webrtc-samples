@@ -11,7 +11,7 @@ importScripts('../../video-processing/js/webgpu-background-blur.js');
 importScripts('../../video-processing/js/canvas-transform.js');
 importScripts('../../video-processing/js/simple-transforms.js');
 importScripts('../../video-processing/js/webcodec-transform.js');
-importScripts('../../video-processing/js/webgl-transform.js/');
+importScripts('../../video-processing/js/webgl-transform.js');
 importScripts('../../video-processing/js/webnn-deeplabv3.js');
 importScripts('../../../../js/third_party/numpy.js');
 
