@@ -197,6 +197,7 @@ const batch = [4, 4];
     /** @private {string} */
     this.debugPath_ = 'debug.pipeline.frameTransform_';
 
+    this.enableWorkaroundForGPUMemoryLeak_ = true;
     this.context_ = null;
     this.device_ = null;
     this.adapter_ = null;
@@ -278,6 +279,15 @@ const batch = [4, 4];
     this.blurPipeline_ = blurPipeline;
 
     const presentationFormat = context.getPreferredFormat(adapter);
+
+    if (this.enableWorkaroundForGPUMemoryLeak_) {
+      this.videoFrameCanvas_ = new OffscreenCanvas(1, 1);
+      this.videoFrameContext_ = null;
+      this.requireSwizzle_ = presentationFormat === 'bgra8unorm' ? true : false;
+      this.presentationWidth_ = 0;
+      this.presentationHeight_ = 0;
+      this.downloadBuffer_ = null;
+    }
     const fullscreenQuadPipeline = device.createRenderPipeline({
       vertex: {
         module: device.createShaderModule({
@@ -460,14 +470,38 @@ const batch = [4, 4];
         canvas.width * devicePixelRatio,
         canvas.height * devicePixelRatio,
       ];
+
+      if (this.enableWorkaroundForGPUMemoryLeak_) {
+        this.presentationWidth_ = presentationSize[0];
+        this.presentationHeight_ = presentationSize[1];
+      }
+
       const presentationFormat = this.context_.getPreferredFormat(this.adapter_);
       this.context_.configure({
           device: this.device_,
           format: presentationFormat,
           size: presentationSize,
+          usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC
         });
       this.initResources_(frameWidth, frameHeight);
     }
+
+    if (this.enableWorkaroundForGPUMemoryLeak_) {
+      if (this.videoFrameCanvas_.width !== frameWidth || this.videoFrameCanvas_.height !== frameHeight) {
+        const devicePixelRatio = window.devicePixelRatio || 1;
+        this.videoFrameCanvas_.width = frameWidth;
+        this.videoFrameCanvas_.height = frameHeight;
+        this.videoFrameContext_ = this.videoFrameCanvas_.getContext('2d');
+
+        const widthBit = Math.ceil(this.presentationWidth_ * 4 / 256)
+        const bytesPerRow = widthBit * 256;
+        this.downloadBufferBytesPerRow_ = bytesPerRow;
+        this.downloadBuffer_ = device.createBuffer({size: bytesPerRow * this.presentationHeight_,
+                                                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+                                                mappedAtCreation: false});
+      }
+    }
+
     const videoBitmap = await createImageBitmap(frame);
     device.queue.copyExternalImageToTexture(
       { source: videoBitmap },
@@ -691,10 +725,58 @@ const batch = [4, 4];
 
     await device.queue.onSubmittedWorkDone();
 
+    if (this.enableWorkaroundForGPUMemoryLeak_) {
+      const encoder = device.createCommandEncoder();
+      encoder.copyTextureToBuffer(
+        {
+          texture: this.context_.getCurrentTexture()
+        },
+        {
+          buffer: this.downloadBuffer_,
+          bytesPerRow: this.downloadBufferBytesPerRow_,
+          rowsPerImage: this.presentationHeight_
+        },
+        {
+          width: this.presentationWidth_,
+          height: this.presentationHeight_,
+        }
+      );
+      device.queue.submit([encoder.finish()]);
+      await device.queue.onSubmittedWorkDone();
+
+      await this.downloadBuffer_.mapAsync(GPUMapMode.READ);
+      const content = new Uint8ClampedArray(this.downloadBuffer_.getMappedRange());
+
+      let imageDataContent;
+
+      if (this.requireSwizzle_) {
+        imageDataContent = new Uint8ClampedArray(4 * this.presentationWidth_ * this.presentationHeight_);
+        for (let i = 0; i < this.presentationHeight_; ++i) {
+          for (let j = 0; j < this.presentationWidth_; ++j) {
+            let pixelPos = (i * this.presentationWidth_ + j) * 4;
+            imageDataContent[pixelPos] = content[pixelPos + 2];
+            imageDataContent[pixelPos + 1] = content[pixelPos + 1];
+            imageDataContent[pixelPos + 2] = content[pixelPos ];
+            imageDataContent[pixelPos + 3] = content[pixelPos + 3];
+          }
+        }
+      } else {
+        imageDataContent = content;
+      }
+
+      const imageData = new ImageData(imageDataContent, this.presentationWidth_, this.presentationHeight_);
+      const finalImage = await createImageBitmap(imageData);
+      this.videoFrameContext_.drawImage(finalImage, 0, 0);
+      this.downloadBuffer_.unmap();
+      finalImage.close();
+    }
+
     // Create a video frame from canvas and enqueue it to controller
     // alpha: 'discard' is needed in order to send frames to a PeerConnection.
     frame.close();
-    controller.enqueue(new VideoFrame(this.canvas_, {timestamp: frame.timestamp, alpha: 'discard'}));
+
+    const canvasSourceImage = this.enableWorkaroundForGPUMemoryLeak_ ? this.videoFrameCanvas_ : this.canvas_;
+    controller.enqueue(new VideoFrame(canvasSourceImage, {timestamp: frame.timestamp, alpha: 'discard'}));
   }
 
   /** @override */
