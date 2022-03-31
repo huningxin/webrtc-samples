@@ -537,9 +537,9 @@ const batch = [4, 4];
       ],
     });
 
-    const commandEncoder = device.createCommandEncoder();
+    let commandEncoder = device.createCommandEncoder();
 
-    const computePass = commandEncoder.beginComputePass();
+    let computePass = commandEncoder.beginComputePass();
     computePass.setPipeline(this.blurPipeline_);
     computePass.setBindGroup(0, this.computeConstants_);
 
@@ -646,8 +646,13 @@ const batch = [4, 4];
         Math.ceil(this.segmentationHeight_ / 8)
       );
 
+      computePass.end();
+      device.queue.submit([commandEncoder.finish()]);
+
       this.deeplab_.compute(this.inputTensorBuffer_, this.segmapBuffer_);
 
+      commandEncoder = device.createCommandEncoder();
+      computePass = commandEncoder.beginComputePass();
       computePass.setPipeline(this.segmentationPipeline_);
       computePass.setBindGroup(0, segmentationBindBroup);
       computePass.dispatch(
