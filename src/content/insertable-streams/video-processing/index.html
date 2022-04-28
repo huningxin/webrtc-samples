@@ -58,8 +58,9 @@
     <div class="box">
         <span>Transform:</span>
         <select id="transformSelector" disabled>
-            <option selected value="webgl-background-blur">WebGL blur</option>
-            <option value="webgpu-background-blur">WebGPU blur</option>
+            <option selected value="webgl-background-blur">WebGL background blur</option>
+            <option value="webgpu-background-blur">WebGPU background blur</option>
+            <option value="webnn-webgpu-background-blur">WebNN/WebGPU background blur</option>
             <option value="webgl">WebGL wrap</option>
             <option value="canvas2d">Canvas2D</option>
             <option value="noop">Do nothing</option>
@@ -89,6 +90,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs/dist/tf.min.js"></script>
+<script src="../../../js/third_party/tfjs/tf-backend-webgpu.js"></script>
 
 <script src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
 <script src="js/camera-source.js" async></script>

@@ -6,6 +6,7 @@
  *  tree.
  */
 importScripts('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs/dist/tf.min.js')
+importScripts('../../../../js/third_party/tfjs/tf-backend-webgpu.js');
 importScripts('../../video-processing/js/webgl-background-blur.js');
 importScripts('../../video-processing/js/webgpu-background-blur.js');
 importScripts('../../video-processing/js/canvas-transform.js');
@@ -37,6 +38,9 @@ onmessage = async (event) => {
         break;
       case 'webgpu-background-blur':
         frameTransform = new WebGPUBackgroundBlurTransform();
+        break;
+      case 'webnn-webgpu-background-blur':
+        frameTransform = new WebGPUBackgroundBlurTransform(true);
         break;
       case 'canvas2d':
         frameTransform = new CanvasTransform();

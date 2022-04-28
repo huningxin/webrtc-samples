@@ -190,7 +190,7 @@ const batch = [4, 4];
  * @implements {FrameTransform} in pipeline.js
  */
  class WebGPUBackgroundBlurTransform { // eslint-disable-line no-unused-vars
-  constructor() {
+  constructor(useWebNN = false) {
     // All fields are initialized in init()
     /** @private {?OffscreenCanvas} canvas used to render video frame */
     this.canvas_ = null;
@@ -210,6 +210,7 @@ const batch = [4, 4];
     this.segmapBuffer_ = null;
 
     this.deeplab_ = null;
+    this.useWebNN_ = useWebNN;
     this.hasWebNN_ = true; // will check WebNN when init deeplab
 
     this.isWorker_ = typeof DedicatedWorkerGlobalScope !== 'undefined' &&
@@ -237,7 +238,8 @@ const batch = [4, 4];
     }
     const adapter = await navigator.gpu.requestAdapter();
     this.adapter_ = adapter;
-    const device = await adapter.requestDevice();
+    await tf.setBackend('webgpu');
+    const device = tf.engine().backendInstance.device;
     if (!device) {
       throw new Error('Failed to create GPUDevice.');
     }
@@ -468,6 +470,89 @@ const batch = [4, 4];
         });
       this.initResources_(frameWidth, frameHeight);
     }
+
+    let resultTensor = null;
+    let segmapBuffer = null;
+    if (isSegmentBackground) {
+      if (!this.deeplab_) {
+        if (this.useWebNN_) {
+          this.deeplab_ = new DeepLabV3MNV2Nchw()
+          this.hasWebNN_ = await this.deeplab_.init(this.device_);
+          if (!this.hasWebNN_) {
+            this.deeplab_ = null;
+            if (!this.isWorker_) {
+              this.blurBackgroundCheckbox_.checked = false;
+            }
+          }
+        } else {
+          let modelUrl = '../../../models/deeplab_pascal_1_default_1/model.json';
+          if (this.isWorker_) {
+            modelUrl = '../' + modelUrl;
+          }
+          this.deeplab_ = await tf.loadGraphModel(modelUrl);
+          console.log('DeepLab model loaded', this.deeplab_);
+        }
+      }
+
+      const resizedVideoBitmap = await createImageBitmap(
+        frame, {resizeWidth: this.segmentationWidth_, resizeHeight: this.segmentationHeight_});
+
+      if (this.useWebNN_) {
+        device.queue.copyExternalImageToTexture(
+          { source: resizedVideoBitmap },
+          { texture: this.segmentationInputTexture_ },
+          [this.segmentationWidth_, this.segmentationHeight_]
+        );
+
+        const preprocessBindGroup = device.createBindGroup({
+          layout: this.preprocessPipeline_.getBindGroupLayout(0),
+          entries: [
+            {
+              binding: 0,
+              resource: this.sampler_,
+            },
+            {
+              binding: 1,
+              resource: {
+                buffer: this.inputTensorBuffer_,
+              },
+            },
+            {
+              binding: 2,
+              resource: this.segmentationInputTexture_.createView(),
+            },
+          ],
+        });
+
+        const commandEncoder = device.createCommandEncoder();
+        const computePass = commandEncoder.beginComputePass();
+        computePass.setPipeline(this.preprocessPipeline_);
+        computePass.setBindGroup(0, preprocessBindGroup);
+        computePass.dispatch(
+          Math.ceil(this.segmentationWidth_ / 8),
+          Math.ceil(this.segmentationHeight_ / 8)
+        );
+
+        computePass.end();
+        device.queue.submit([commandEncoder.finish()]);
+
+        this.deeplab_.compute(this.inputTensorBuffer_, this.segmapBuffer_);
+        segmapBuffer = this.segmapBuffer_;
+      } else {
+        // use TF.js WebGPU backend
+        resultTensor = tf.tidy(() => {
+          let inputTensor = tf.browser.fromPixels(resizedVideoBitmap);
+          const inputShape = inputTensor.shape;
+          inputShape.unshift(1);
+          inputTensor = inputTensor.reshape(inputShape);
+          return this.deeplab_.predict(inputTensor);
+        });
+        segmapBuffer = tf.engine().backendInstance.getBuffer(resultTensor.dataId);
+      }
+      resizedVideoBitmap.close();
+    }
+
+    // Upload video frame to texture
     const videoBitmap = await createImageBitmap(frame);
     device.queue.copyExternalImageToTexture(
       { source: videoBitmap },
@@ -477,6 +562,7 @@ const batch = [4, 4];
     videoBitmap.close();
     const externalResource = this.cubeTexture_.createView();
 
+    // Blur
     const blurBindGroup0 = device.createBindGroup({
       layout: this.blurPipeline_.getBindGroupLayout(1),
       entries: [
@@ -537,9 +623,8 @@ const batch = [4, 4];
       ],
     });
 
-    let commandEncoder = device.createCommandEncoder();
-
-    let computePass = commandEncoder.beginComputePass();
+    const commandEncoder = device.createCommandEncoder();
+    const computePass = commandEncoder.beginComputePass();
     computePass.setPipeline(this.blurPipeline_);
     computePass.setBindGroup(0, this.computeConstants_);
 
@@ -570,47 +655,7 @@ const batch = [4, 4];
       );
     }
 
-    if (isSegmentBackground && !this.deeplab_) {
-      this.deeplab_ = new DeepLabV3MNV2Nchw()
-      this.hasWebNN_ = await this.deeplab_.init(this.device_);
-      if (!this.hasWebNN_) {
-        this.deeplab_ = null;
-        if (!this.isWorker_) {
-          this.blurBackgroundCheckbox_.checked = false;
-        }
-      }
-    }
-
-    if (isSegmentBackground && this.deeplab_) {
-      const resizedVideoBitmap = await createImageBitmap(
-        frame, {resizeWidth: this.segmentationWidth_, resizeHeight: this.segmentationHeight_});
-      device.queue.copyExternalImageToTexture(
-        { source: resizedVideoBitmap },
-        { texture: this.segmentationInputTexture_ },
-        [this.segmentationWidth_, this.segmentationHeight_]
-      );
-      resizedVideoBitmap.close();
-
-      const preprocessBindGroup = device.createBindGroup({
-        layout: this.preprocessPipeline_.getBindGroupLayout(0),
-        entries: [
-          {
-            binding: 0,
-            resource: this.sampler_,
-          },
-          {
-            binding: 1,
-            resource: {
-              buffer: this.inputTensorBuffer_,
-            },
-          },
-          {
-            binding: 2,
-            resource: this.segmentationInputTexture_.createView(),
-          },
-        ],
-      });
-
+    if (isSegmentBackground) {
       const segmentationBindBroup = device.createBindGroup({
         layout: this.segmentationPipeline_.getBindGroupLayout(0),
         entries: [
@@ -621,7 +666,7 @@ const batch = [4, 4];
           {
             binding: 1,
             resource: {
-              buffer: this.segmapBuffer_,
+              buffer: segmapBuffer,
             },
           },
           {
@@ -639,20 +684,6 @@ const batch = [4, 4];
         ],
       });
 
-      computePass.setPipeline(this.preprocessPipeline_);
-      computePass.setBindGroup(0, preprocessBindGroup);
-      computePass.dispatch(
-        Math.ceil(this.segmentationWidth_ / 8),
-        Math.ceil(this.segmentationHeight_ / 8)
-      );
-
-      computePass.end();
-      device.queue.submit([commandEncoder.finish()]);
-
-      this.deeplab_.compute(this.inputTensorBuffer_, this.segmapBuffer_);
-
-      commandEncoder = device.createCommandEncoder();
-      computePass = commandEncoder.beginComputePass();
       computePass.setPipeline(this.segmentationPipeline_);
       computePass.setBindGroup(0, segmentationBindBroup);
       computePass.dispatch(
@@ -696,6 +727,10 @@ const batch = [4, 4];
 
     await device.queue.onSubmittedWorkDone();
 
+    if (resultTensor) {
+      resultTensor.dispose();
+    }
+
     // Create a video frame from canvas and enqueue it to controller
     // alpha: 'discard' is needed in order to send frames to a PeerConnection.
     frame.close();
@@ -704,15 +739,15 @@ const batch = [4, 4];
 
   /** @override */
   destroy() {
-    if (this.device_) {
-      console.log('[WebGPUBackgroundBlurTransform] Destory WebGPU device.');
-      this.device_.destroy();
-      this.device_ = null;
+    if (this.deeplab_) {
+      this.deeplab_.dispose();
     }
     this.deeplab_ = null;
     if (!this.isWorker_) {
-      this.gui_.destroy();
-      this.gui_ = null;
+      if (this.gui_) {
+        this.gui_.destroy();
+      }
     }
+    this.gui_ = null;
   }
 }

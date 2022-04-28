@@ -204,4 +204,7 @@ class DeepLabV3MNV2Nchw {
   async compute(inputGPUBuffer, outputGPUBuffer) {
     this.graph_.compute({'input': {resource: inputGPUBuffer}}, {'output': {resource: outputGPUBuffer}});
   }
+
+  dispose() {
+  }
 }
